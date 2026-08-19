@@ -1,6 +1,6 @@
 import os
 import base64
-import tempfile
+from io import BytesIO
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -15,6 +15,7 @@ load_dotenv()
 
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 
+# Streamlit Cloud fallback
 if not SARVAM_API_KEY:
     try:
         SARVAM_API_KEY = st.secrets["SARVAM_API_KEY"]
@@ -22,7 +23,11 @@ if not SARVAM_API_KEY:
         SARVAM_API_KEY = None
 
 if not SARVAM_API_KEY:
-    st.error("SARVAM_API_KEY is not configured.")
+    st.error(
+        "SARVAM_API_KEY is not configured. "
+        "Add it to your .env file locally or "
+        "Streamlit Cloud Secrets in production."
+    )
     st.stop()
 
 
@@ -35,19 +40,6 @@ st.set_page_config(
     page_icon="🎙️",
     layout="centered",
 )
-
-# =========================================================
-# Validate API Key
-# =========================================================
-
-if not SARVAM_API_KEY:
-
-    st.error(
-        "SARVAM_API_KEY is not configured. "
-        "Please add it to your .env file."
-    )
-
-    st.stop()
 
 
 # =========================================================
@@ -64,6 +56,7 @@ client = SarvamAI(
 # =========================================================
 
 st.title("🎙️ Sarvam AI Voice Assistant")
+
 st.caption("Created by Kalidasan Seetharaman")
 
 st.write(
@@ -133,32 +126,27 @@ audio_file = st.audio_input(
 # =========================================================
 
 def speech_to_text(audio_bytes, language_code):
+    """
+    Convert recorded audio to text using Saaras:v3.
 
-    with tempfile.NamedTemporaryFile(
-        suffix=".wav",
-        delete=False
-    ) as temp_file:
+    Streamlit Cloud can report the uploaded audio as
+    audio/vnd.wave. To avoid MIME-type issues, we create
+    a fresh in-memory file and explicitly give it a .wav name.
+    """
 
-        temp_file.write(audio_bytes)
-        temp_file_path = temp_file.name
+    audio = BytesIO(audio_bytes)
 
-    try:
+    # Important for Sarvam SDK / Streamlit Cloud
+    audio.name = "audio.wav"
 
-        with open(temp_file_path, "rb") as audio:
+    response = client.speech_to_text.transcribe(
+        file=audio,
+        model="saaras:v3",
+        language_code=language_code,
+        mode="transcribe",
+    )
 
-            response = client.speech_to_text.transcribe(
-                file=audio,
-                model="saaras:v3",
-                language_code=language_code,
-                mode="transcribe",
-            )
-
-        return response
-
-    finally:
-
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+    return response
 
 
 # =========================================================
@@ -223,21 +211,15 @@ Guidelines:
 def text_to_speech(
     text,
     language_code,
-    speaker
+    speaker,
 ):
 
     response = client.text_to_speech.convert(
-
         text=text,
-
         model="bulbul:v3",
-
         language_code=language_code,
-
         speaker=speaker,
-
         pace=1.0,
-
         speech_sample_rate=24000,
     )
 
@@ -252,7 +234,7 @@ if audio_file:
 
     st.audio(
         audio_file,
-        format="audio/wav"
+        format="audio/wav",
     )
 
     st.divider()
@@ -282,9 +264,7 @@ if audio_file:
                     language_code,
                 )
 
-                transcript = (
-                    stt_response.transcript
-                )
+                transcript = stt_response.transcript
 
             except Exception as e:
 
@@ -445,9 +425,9 @@ if audio_file:
         st.write(
             "🎤 Speech"
             " → "
-            "📝 Saaras STT"
+            "📝 Saaras:v3 STT"
             " → "
-            "🤖 Sarvam LLM"
+            "🤖 Sarvam-105B"
             " → "
-            "🔊 Bulbul TTS"
+            "🔊 Bulbul:v3 TTS"
         )
