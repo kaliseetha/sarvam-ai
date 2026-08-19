@@ -1,6 +1,6 @@
 import os
 import base64
-from io import BytesIO
+import requests
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -15,7 +15,7 @@ load_dotenv()
 
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 
-# Streamlit Cloud fallback
+# Streamlit Cloud Secrets fallback
 if not SARVAM_API_KEY:
     try:
         SARVAM_API_KEY = st.secrets["SARVAM_API_KEY"]
@@ -24,9 +24,9 @@ if not SARVAM_API_KEY:
 
 if not SARVAM_API_KEY:
     st.error(
-        "SARVAM_API_KEY is not configured. "
-        "Add it to your .env file locally or "
-        "Streamlit Cloud Secrets in production."
+        "SARVAM_API_KEY is not configured.\n\n"
+        "Local: add it to .env\n"
+        "Streamlit Cloud: add it to Secrets."
     )
     st.stop()
 
@@ -60,7 +60,7 @@ st.title("🎙️ Sarvam AI Voice Assistant")
 st.caption("Created by Kalidasan Seetharaman")
 
 st.write(
-    "Speak in Tamil or English. "
+    "Speak in Tamil, English, or Hindi. "
     "Sarvam converts your voice to text, "
     "generates an AI response, and speaks "
     "the response back to you."
@@ -127,26 +127,46 @@ audio_file = st.audio_input(
 
 def speech_to_text(audio_bytes, language_code):
     """
-    Convert recorded audio to text using Saaras:v3.
+    Use Sarvam REST API for STT.
 
-    Streamlit Cloud can report the uploaded audio as
-    audio/vnd.wave. To avoid MIME-type issues, we create
-    a fresh in-memory file and explicitly give it a .wav name.
+    We explicitly send the uploaded audio as:
+        filename = audio.wav
+        MIME type = audio/wav
+
+    This avoids the Streamlit Cloud issue where the
+    recorded audio can be reported as audio/vnd.wave.
     """
 
-    audio = BytesIO(audio_bytes)
+    files = {
+        "file": (
+            "audio.wav",
+            audio_bytes,
+            "audio/wav",
+        )
+    }
 
-    # Important for Sarvam SDK / Streamlit Cloud
-    audio.name = "audio.wav"
+    data = {
+        "model": "saaras:v3",
+        "mode": "transcribe",
+        "language_code": language_code,
+    }
 
-    response = client.speech_to_text.transcribe(
-        file=audio,
-        model="saaras:v3",
-        language_code=language_code,
-        mode="transcribe",
+    headers = {
+        "api-subscription-key": SARVAM_API_KEY,
+    }
+
+    response = requests.post(
+        "https://api.sarvam.ai/speech-to-text",
+        headers=headers,
+        files=files,
+        data=data,
+        timeout=60,
     )
 
-    return response
+    # Raise an exception for HTTP errors
+    response.raise_for_status()
+
+    return response.json()
 
 
 # =========================================================
@@ -264,7 +284,31 @@ if audio_file:
                     language_code,
                 )
 
-                transcript = stt_response.transcript
+                transcript = stt_response.get(
+                    "transcript"
+                )
+
+                if not transcript:
+                    st.error(
+                        "Speech-to-text returned an empty transcript."
+                    )
+                    st.stop()
+
+            except requests.exceptions.HTTPError as e:
+
+                st.error(
+                    f"Speech-to-text API failed:\n\n{e}"
+                )
+
+                # Show API response for debugging
+                try:
+                    st.code(
+                        e.response.text
+                    )
+                except Exception:
+                    pass
+
+                st.stop()
 
             except Exception as e:
 
@@ -337,10 +381,8 @@ if audio_file:
 
         if language_code == "unknown":
 
-            detected_language = getattr(
-                stt_response,
-                "language_code",
-                None,
+            detected_language = stt_response.get(
+                "language_code"
             )
 
             if detected_language:

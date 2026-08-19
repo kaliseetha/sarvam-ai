@@ -1,3 +1,4 @@
 streamlit>=1.40.0
 sarvamai
 python-dotenv
+requests
