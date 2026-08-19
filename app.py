@@ -13,7 +13,13 @@ from sarvamai import SarvamAI
 
 load_dotenv()
 
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY") or st.secrets.get("SARVAM_API_KEY")
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+
+if not SARVAM_API_KEY:
+    try:
+        SARVAM_API_KEY = st.secrets["SARVAM_API_KEY"]
+    except (FileNotFoundError, KeyError):
+        SARVAM_API_KEY = None
 
 if not SARVAM_API_KEY:
     st.error("SARVAM_API_KEY is not configured.")
